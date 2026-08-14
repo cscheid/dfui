@@ -204,6 +204,28 @@ after issue work — the skein syncs itself. (A `.braid/snapshot.jsonl` backup
 *is* committed periodically, but it is **backup-only and one-directional** —
 see the snapshot policy below. Never `braid import` it back.)
 
+### Snapshot policy
+
+`.braid/snapshot.jsonl` is a **backup, not a source of truth**. Refresh it when
+committing a batch of issue work:
+
+```sh
+braid export > .braid/snapshot.jsonl
+```
+
+Rules:
+
+- **One-directional.** Never `braid import` it back. The skein is the source of
+  truth; importing a stale snapshot would resurrect closed strands and clobber
+  edits made elsewhere.
+- **Never blocks work.** A stale snapshot is harmless. Do not treat refreshing
+  it as a required step after every `braid` command.
+- **Verify it carries no secret before committing.** `braid export` emits
+  strands only, and was checked against the doc id in `.braid.toml` when this
+  repo was first pushed — but the repo is on GitHub now, so re-check if the
+  export format ever changes. The doc id is a bearer token granting read and
+  write to the skein; `.braid.toml` stays gitignored.
+
 For the authoritative, version-matched command guide, run `braid agents-info`
 (or invoke the `/braid` skill). The quick reference below is a convenience
 summary, not the contract.
