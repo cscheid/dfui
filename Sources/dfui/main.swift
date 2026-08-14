@@ -11,7 +11,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.font = .monospacedDigitSystemFont(ofSize: 0, weight: .regular)
         item.menu = buildMenu()
         statusItem = item
 
@@ -98,13 +97,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    /// Set by `--simulate-free-gb`. The low-space appearance is otherwise
+    /// unobservable until the disk is actually in trouble, which is a bad time
+    /// to discover the warning does not work.
+    static var simulatedFreeBytes: UInt64?
+
     fileprivate func refresh() {
+        guard let button = statusItem?.button else { return }
         do {
-            let usage = try diskUsage(ofVolumeContaining: "/")
-            statusItem?.button?.title = formatUsage(usage)
+            var usage = try diskUsage(ofVolumeContaining: "/")
+            if let simulated = Self.simulatedFreeBytes {
+                usage = DiskUsage(free: simulated, total: usage.total)
+            }
+            button.attributedTitle = title(menuBarText(usage), pressure: usage.pressure)
+            button.toolTip = tooltipText(usage)
         } catch {
-            statusItem?.button?.title = "?/?TB"
+            button.attributedTitle = title("?", pressure: .low)
+            button.toolTip = "dfui: \(error)"
             FileHandle.standardError.write(Data("dfui: \(error)\n".utf8))
+        }
+    }
+
+    /// Low space is signalled three redundant ways — color, weight, and the
+    /// unit switch in `menuBarText` — so it does not depend on noticing a hue.
+    private func title(_ text: String, pressure: DiskPressure) -> NSAttributedString {
+        let size = NSFont.systemFontSize
+        switch pressure {
+        case .normal:
+            return NSAttributedString(string: text, attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: .regular),
+            ])
+        case .low:
+            return NSAttributedString(string: text, attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: .bold),
+                .foregroundColor: NSColor.systemRed,
+            ])
         }
     }
 
@@ -149,6 +176,17 @@ if let index = CommandLine.arguments.firstIndex(of: "--login-item") {
     }
     print(description)
     exit(LoginItem.state == .unavailable ? 1 : 0)
+}
+
+// `dfui --simulate-free-gb 50` pretends the disk has that much free, so the
+// low-space appearance can be inspected without filling the disk.
+if let index = CommandLine.arguments.firstIndex(of: "--simulate-free-gb") {
+    guard CommandLine.arguments.count > index + 1,
+          let gb = Double(CommandLine.arguments[index + 1]), gb >= 0 else {
+        FileHandle.standardError.write(Data("usage: dfui --simulate-free-gb <number>\n".utf8))
+        exit(2)
+    }
+    AppDelegate.simulatedFreeBytes = UInt64(gb * 1_000_000_000)
 }
 
 let delegate = AppDelegate()

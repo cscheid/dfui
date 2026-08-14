@@ -2,8 +2,13 @@ import Foundation
 
 /// Capacity of a single mounted volume, in bytes.
 public struct DiskUsage: Equatable, Sendable {
-    /// Bytes available to an unprivileged process — this is `df`'s "Avail"
-    /// column, not `f_bfree` (which includes the root-reserved slack).
+    /// Bytes available to an unprivileged process — `df`'s "Avail" column.
+    ///
+    /// This deliberately excludes *purgeable* space (Time Machine local
+    /// snapshots, evictable caches), which Finder counts as free. The
+    /// conservative number is the better alarm: it is what can be written
+    /// without the OS first reclaiming anything. See
+    /// `br-free-space-semantics-ogn2huun`.
     public let free: UInt64
     public let total: UInt64
 
@@ -49,11 +54,63 @@ public func formatSignificant(_ value: Double, digits: Int) -> String {
     return String(format: "%.\(decimals)f", rounded)
 }
 
-/// The menu bar string: free with two significant digits over total with one,
-/// both in decimal terabytes — e.g. `0.35/2TB`.
+/// How alarmed the indicator should look.
+public enum DiskPressure: Equatable, Sendable {
+    case normal
+    case low
+}
+
+/// Free space below this fraction of the volume counts as low. On a 2 TB disk
+/// that fires at ~100 GB — comfortably above the few GB where macOS itself
+/// starts misbehaving, and above what a single cargo build can write.
+public let lowSpaceFraction = 0.05
+
+extension DiskUsage {
+    public var fractionFree: Double {
+        total == 0 ? 0 : Double(free) / Double(total)
+    }
+
+    /// A zero-capacity volume reads as `.low`: something is wrong, and the
+    /// alarming answer is the safe one.
+    public var pressure: DiskPressure {
+        fractionFree < lowSpaceFraction ? .low : .normal
+    }
+}
+
+private let gigabyte = 1_000_000_000.0
+private let terabyte = 1_000_000_000_000.0
+
+/// Free over total in decimal terabytes — e.g. `0.35/2TB`.
 public func formatUsage(_ usage: DiskUsage) -> String {
-    let terabyte = 1_000_000_000_000.0
     let free = formatSignificant(Double(usage.free) / terabyte, digits: 2)
     let total = formatSignificant(Double(usage.total) / terabyte, digits: 1)
     return "\(free)/\(total)TB"
+}
+
+/// Free space alone, in decimal gigabytes — e.g. `98GB`.
+public func formatFreeGB(_ usage: DiskUsage) -> String {
+    "\(formatSignificant(Double(usage.free) / gigabyte, digits: 2))GB"
+}
+
+/// What the menu bar shows.
+///
+/// Under pressure the format changes, not just the color. In TB the whole
+/// danger zone collapses into a smear of leading zeros — `0.020/2TB` versus
+/// `0.0020/2TB` is a 10x difference in trouble, distinguished only by counting
+/// decimal places in an 11px font. Below the threshold the denominator stops
+/// carrying information (you know how big your disk is) and the absolute
+/// number starts mattering, so it switches to plain GB.
+public func menuBarText(_ usage: DiskUsage) -> String {
+    switch usage.pressure {
+    case .normal: return formatUsage(usage)
+    case .low: return formatFreeGB(usage)
+    }
+}
+
+/// Precise figures for the tooltip, where there is room for them.
+public func tooltipText(_ usage: DiskUsage) -> String {
+    let free = String(format: "%.1f", Double(usage.free) / gigabyte)
+    let total = String(format: "%.1f", Double(usage.total) / gigabyte)
+    let percent = String(format: "%.1f", usage.fractionFree * 100)
+    return "\(free) GB free of \(total) GB (\(percent)%)"
 }

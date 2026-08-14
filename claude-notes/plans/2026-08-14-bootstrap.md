@@ -50,6 +50,41 @@ nothing even when the item is enabled. Use `--login-item status` instead.
 
 Not verifiable here: that it actually launches on boot. That needs a reboot.
 
+## Follow-up: low-space warning (br-low-space-warning-u3c8slzu)
+
+- [x] `pressure` on `DiskUsage`, thresholded at `lowSpaceFraction` = 5%
+- [x] Red + bold + unit switch to GB below the threshold
+- [x] Tooltip with precise figures
+- [x] `--simulate-free-gb` to make the alarm state observable
+- [x] Verified both states visually
+
+### Why 5%
+
+The user's ask: a fixed proportion landing near 100 GB on their 2 TB disk. 5%
+gives 99.8 GB. That is comfortably above the few GB where macOS itself becomes
+unstable, and above what a single cargo build can write, so the warning arrives
+with room to act rather than as a postmortem.
+
+Eventually worth making configurable; deliberately fixed for now.
+
+### The free-space semantics question, settled
+
+Measured on the user's machine: `statfs` f_bavail 969.6 GB vs
+`volumeAvailableCapacityForImportantUsage` 969.7 GB — a 0.1 GB gap. They agree
+because Time Machine has no destination configured, so there are no local
+snapshots and nothing meaningful is purgeable.
+
+The two numbers differ only by purgeable space. `statfs` is the conservative
+one (what can be written right now); the Finder number is a promise that
+depends on macOS reclaiming space under pressure, which happens late and under
+exactly the write pressure you are trying to survive. For an alarm the
+conservative number is correct, and it keeps `df -h /` a valid cross-check.
+Decision: keep `statfs`, revisit only if Time Machine is ever enabled.
+
+Also measured: `volumeAvailableCapacityForOpportunisticUsage` reads ~12 GB
+below plain available — macOS's own estimate of the headroom it wants. A useful
+sanity check that "the system is unhappy" starts well above zero bytes.
+
 ## Design decisions
 
 **Swift + SwiftPM, no Xcode project.** The machine has Command Line Tools only

@@ -33,6 +33,30 @@ The script handles the awkward parts: it quits the installed copy before
 overwriting the bundle, and relaunches it afterwards if it had been running, so
 a reinstall doesn't silently leave your menu bar empty.
 
+## The low-space warning
+
+Below `lowSpaceFraction` (5% — ~100 GB on a 2 TB disk) the indicator changes in
+three redundant ways at once: **red**, **bold**, and a **unit switch** from the
+TB ratio to plain GB (`0.11/2TB` → `98GB`).
+
+The unit switch is the part that is easy to mistake for a flourish, so: in TB,
+the entire danger zone collapses into leading zeros. `0.020/2TB` and
+`0.0020/2TB` are a 10x difference in how much trouble you are in, distinguished
+only by counting decimal places in an 11px menu bar font. Below the threshold
+the denominator has stopped carrying information — you know how big your disk
+is — and the absolute number is what matters. Not relying on color alone also
+means the warning survives a colorblind reader or a bad monitor.
+
+Inspect the warning without filling the disk:
+
+```sh
+swift run dfui --simulate-free-gb 50    # red, bold, "50GB"
+swift run dfui --simulate-free-gb 110   # normal, "0.11/2TB"
+```
+
+Keep that flag working. An alarm nobody has ever seen fire is an alarm nobody
+should trust, and the real condition is expensive to reproduce.
+
 ## Login item
 
 "Open at Login" in the menu drives `SMAppService.mainApp`, which registers with
