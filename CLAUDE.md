@@ -63,6 +63,50 @@ swift run dfui --simulate-free-gb 110   # normal, "0.11/2TB"
 Keep that flag working. An alarm nobody has ever seen fire is an alarm nobody
 should trust, and the real condition is expensive to reproduce.
 
+## The scan
+
+"Scan for Large Directories…" walks the home directory, writes an HTML report
+to a temporary directory, and opens it in the browser. It **never deletes
+anything** — it prints `cargo clean` commands for the user to review and run.
+Keep it that way.
+
+```sh
+swift run dfui --scan            # scans $HOME, prints the report path
+swift run dfui --scan /some/dir  # scans elsewhere
+```
+
+### Validating cargo targets is a safety requirement, not a nicety
+
+`isCargoTarget` checks for `CACHEDIR.TAG` inside the directory or a sibling
+`Cargo.toml`. **Do not** relax this to a name match. On the author's machine, of
+33 directories named `target`, 8 were not build output — five of them were
+`~/.cargo/registry/src/index.crates.io-*/cc-*/src/target`, source directories
+belonging to cached crates. A report suggesting those be deleted would invite
+someone to corrupt their own registry cache. The report lists rejected
+directories explicitly so an omission is visible rather than silent.
+
+`pruneNested` similarly prevents a `target/` inside another `target/` from
+being counted twice.
+
+### Why one `du` pass
+
+`du` already emits a line per directory, so the `target/` entries and the
+shallow summary both come out of a single traversal. Measured alternatives on
+a ~745 GB home directory:
+
+| approach | cost |
+|---|---|
+| `find -name target -prune` | 7.9s (finds them, no sizes) |
+| `du -sk` on each target | +21s |
+| `du -k -d 2 ~` for the summary | 45.6s |
+| **one `du -k -x ~` pass, filtered** | **47s total** |
+
+Spotlight (`mdfind`) is far faster (0.19s) but **incomplete** — it found 10 of
+13 target directories under `~/repos`. It is not trustworthy for this.
+
+Output is read incrementally: a full home directory emits hundreds of megabytes
+of `du` lines and only a few hundred matter, so nothing is buffered whole.
+
 ## Single instance
 
 On launch, `SingleInstance.terminateOthers()` quits already-running copies with

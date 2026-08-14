@@ -1,5 +1,6 @@
 // Minimal assertion harness. See Package.swift for why this is an executable
 // rather than a proper test target.
+import DiskScan
 import DiskStats
 import Foundation
 
@@ -88,6 +89,92 @@ expect(menuBarText(atGB(20)) != menuBarText(atGB(2)), "20GB and 2GB read differe
 
 expect(tooltipText(DiskUsage(free: 98_000_000_000, total: 1_995_165_736_960)),
        "98.0 GB free of 1995.2 GB (4.9%)", "tooltip carries the precise figures")
+
+// MARK: du output parsing
+
+expect(parseDuLine("12345\t/Users/x/foo")?.bytes == 12345 * 1024, "du line size is KiB")
+expect(parseDuLine("12345\t/Users/x/foo")?.path == "/Users/x/foo", "du line path")
+expect(parseDuLine("0\t/tmp")?.bytes == 0, "zero size parses")
+expect(parseDuLine("nonsense") == nil, "line without a tab is ignored")
+expect(parseDuLine("abc\t/tmp") == nil, "non-numeric size is ignored")
+expect(parseDuLine("12\t") == nil, "empty path is ignored")
+// Paths containing spaces and tabs-in-name are common enough to matter.
+expect(parseDuLine("99\t/Users/x/My Project/target")?.path == "/Users/x/My Project/target",
+       "spaces in path survive")
+
+// MARK: depth
+
+expect(relativeDepth(of: "/Users/x", under: "/Users/x") == 0, "root is depth 0")
+expect(relativeDepth(of: "/Users/x/a", under: "/Users/x") == 1, "one level")
+expect(relativeDepth(of: "/Users/x/a/b", under: "/Users/x") == 2, "two levels")
+expect(relativeDepth(of: "/Users/x/", under: "/Users/x/") == 0, "trailing slashes tolerated")
+expect(relativeDepth(of: "/Users/other", under: "/Users/x") == nil, "outside the root")
+// A sibling with a shared prefix must not read as a descendant.
+expect(relativeDepth(of: "/Users/xyz/a", under: "/Users/x") == nil, "prefix is not containment")
+
+// MARK: nesting
+
+expect(isDescendant("/a/b/c", of: "/a/b"), "plain descendant")
+expect(!isDescendant("/a/bc", of: "/a/b"), "shared prefix is not a descendant")
+expect(!isDescendant("/a/b", of: "/a/b"), "a path is not its own descendant")
+
+let nested = pruneNested([
+    SizedPath(path: "/p/target", bytes: 100),
+    SizedPath(path: "/p/target/debug/x/target", bytes: 10),
+    SizedPath(path: "/q/target", bytes: 50),
+])
+expect(nested.count == 2, "nested target is dropped, siblings kept")
+expect(nested.contains { $0.path == "/p/target" }, "outer target kept")
+expect(nested.contains { $0.path == "/q/target" }, "unrelated target kept")
+expect(!nested.contains { $0.path.hasSuffix("debug/x/target") }, "inner target dropped")
+
+// MARK: collector
+
+var collector = ScanCollector(root: "/r", summaryDepth: 2)
+for line in ["10\t/r", "20\t/r/a", "30\t/r/a/b", "40\t/r/a/b/c", "50\t/r/p/target",
+             "60\t/elsewhere/x"] {
+    collector.ingest(line)
+}
+// /r/a, /r/a/b and /r/p/target — the last is a real directory at depth 2 and
+// belongs in the summary as well as the target list.
+expect(collector.directories.count == 3, "summary keeps depth 1 and 2 only, excluding the root")
+expect(!collector.directories.contains { $0.path == "/r" }, "root excluded from summary")
+expect(!collector.directories.contains { $0.path == "/r/a/b/c" }, "depth 3 excluded")
+expect(!collector.directories.contains { $0.path == "/elsewhere/x" }, "outside root excluded")
+expect(collector.targetCandidates.count == 1, "target found at any depth")
+expect(collector.targetCandidates.first?.bytes == 50 * 1024, "target size carried through")
+
+// MARK: cargo validation
+
+// The real hazard: .cargo/registry/src/<crate>/src/target is a source
+// directory, not build output, and must never be offered up for deletion.
+let scratch = NSTemporaryDirectory() + "/dfui-selftest-\(getpid())"
+let fm = FileManager.default
+try? fm.createDirectory(atPath: scratch + "/real/target", withIntermediateDirectories: true)
+fm.createFile(atPath: scratch + "/real/target/CACHEDIR.TAG", contents: Data())
+try? fm.createDirectory(atPath: scratch + "/sibling/target", withIntermediateDirectories: true)
+fm.createFile(atPath: scratch + "/sibling/Cargo.toml", contents: Data())
+try? fm.createDirectory(atPath: scratch + "/impostor/src/target", withIntermediateDirectories: true)
+
+expect(isCargoTarget(scratch + "/real/target"), "CACHEDIR.TAG identifies a cargo target")
+expect(isCargoTarget(scratch + "/sibling/target"), "sibling Cargo.toml identifies a cargo target")
+expect(!isCargoTarget(scratch + "/impostor/src/target"), "a directory merely named target is rejected")
+try? fm.removeItem(atPath: scratch)
+
+// MARK: report formatting
+
+expect(formatBytes(165_700_000_000), "165.7 GB", "GB size")
+expect(formatBytes(1_500_000_000_000), "1.50 TB", "TB size")
+expect(formatBytes(5_000_000), "5 MB", "MB size")
+
+let now = Date(timeIntervalSince1970: 1_800_000_000)
+expect(formatAge(now, now: now), "today", "same instant is today")
+expect(formatAge(now.addingTimeInterval(-86_400 * 5), now: now), "5 days ago", "days")
+expect(formatAge(now.addingTimeInterval(-86_400 * 90), now: now), "3 months ago", "months")
+expect(formatAge(nil, now: now), "unknown", "missing date")
+
+expect(htmlEscape("<a href=\"x\">&</a>"), "&lt;a href=&quot;x&quot;&gt;&amp;&lt;/a&gt;",
+       "html escaping covers the injection characters")
 
 // MARK: statfs
 

@@ -111,6 +111,41 @@ pre-feature code. Exactly the hazard already written up in CLAUDE.md, walked
 into while implementing the next feature. Rebuild *both* copies before
 comparing their behaviour.
 
+## Follow-up: drill-down scan (br-drilldown-8o912xiw)
+
+- [x] `DiskScan` module: one `du` pass, incremental parse, cargo validation
+- [x] HTML report written to a temp dir and opened in the browser
+- [x] "Scan for Large Directories…" menu item, run off the main thread
+- [x] `--scan [root]` for headless use and testing
+- [x] Tests for parsing, depth, nesting, validation and formatting
+
+### Measured, not guessed
+
+On a ~745 GB home directory: `find -name target -prune` 7.9s; `du -sk` per
+target +21s; `du -k -d 2 ~` 45.6s; one filtered `du -k -x ~` pass 47s. The
+single pass wins because `du` already prints a line per directory, so the
+target entries and the shallow summary come from the same traversal.
+
+Spotlight was tempting — `mdfind` answered in 0.19s — but it is **incomplete**,
+finding 10 of 13 target directories under `~/repos`. Rejected.
+
+### The safety finding
+
+Of 33 directories named `target`, only 25 were cargo build output. Five of the
+other 8 were `~/.cargo/registry/src/index.crates.io-*/cc-*/src/target` —
+*source* directories inside cached crates. Offering those for deletion would
+have invited registry corruption. `CACHEDIR.TAG` and a sibling `Cargo.toml`
+agreed on all 33, so validation uses both. Rejected directories are listed in
+the report rather than silently dropped.
+
+First real run: 25 targets, 492 GB reclaimable, 47s.
+
+### Not verified
+
+The menu path itself was never clicked — menu items are not scriptable from
+here. It shares `writeReport` and `finishScan` with the verified `--scan` path,
+but the click, the "Scanning…" state and the browser handoff are unconfirmed.
+
 ## Design decisions
 
 **Swift + SwiftPM, no Xcode project.** The machine has Command Line Tools only

@@ -1,4 +1,5 @@
 import AppKit
+import DiskScan
 import DiskStats
 
 @MainActor
@@ -8,6 +9,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var timer: Timer?
     private var loginItemMenuItem: NSMenuItem?
+    private var scanMenuItem: NSMenuItem?
+    private var isScanning = false
+
+    private let scanIdleTitle = "Scan for Large Directories…"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Before adding our own status item, so there is never a moment with
@@ -37,6 +42,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshItem.target = self
         menu.addItem(refreshItem)
 
+        let scanItem = NSMenuItem(title: scanIdleTitle, action: #selector(startScan), keyEquivalent: "s")
+        scanItem.target = self
+        menu.addItem(scanItem)
+        scanMenuItem = scanItem
+
+        menu.addItem(.separator())
+
         let loginItem = NSMenuItem(title: "Open at Login", action: #selector(toggleLoginItem), keyEquivalent: "")
         loginItem.target = self
         menu.addItem(loginItem)
@@ -50,6 +62,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func refreshFromMenu() { refresh() }
+
+    @objc private func startScan() {
+        guard !isScanning else { return }
+        isScanning = true
+        scanMenuItem?.title = "Scanning…"
+        scanMenuItem?.isEnabled = false
+
+        let root = NSHomeDirectory()
+        Task.detached(priority: .utility) {
+            let outcome = Result { try runScan(root: root) }
+            await MainActor.run { AppDelegate.shared?.finishScan(outcome) }
+        }
+    }
+
+    private func finishScan(_ outcome: Result<ScanResult, Error>) {
+        isScanning = false
+        scanMenuItem?.title = scanIdleTitle
+        scanMenuItem?.isEnabled = true
+
+        switch outcome {
+        case let .success(result):
+            do {
+                NSWorkspace.shared.open(try writeReport(result))
+            } catch {
+                presentError("Could not write the scan report.", error)
+            }
+        case let .failure(error):
+            presentError("The scan failed.", error)
+        }
+    }
+
+    /// Writes the report somewhere disposable. A tool about disk space should
+    /// not quietly accumulate files, and the temporary directory is cleaned by
+    /// the system.
+    private func writeReport(_ result: ScanResult) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("dfui", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let stamp = ISO8601DateFormatter()
+        stamp.formatOptions = [.withYear, .withMonth, .withDay, .withTime]
+        let name = "scan-\(stamp.string(from: result.finishedAt).replacingOccurrences(of: ":", with: "")).html"
+
+        let url = directory.appendingPathComponent(name)
+        try renderHTML(result).write(to: url, atomically: true, encoding: .utf8)
+        return url
+    }
 
     @objc private func toggleLoginItem() {
         switch LoginItem.state {
@@ -180,6 +238,34 @@ if let index = CommandLine.arguments.firstIndex(of: "--login-item") {
     }
     print(description)
     exit(LoginItem.state == .unavailable ? 1 : 0)
+}
+
+// `dfui --scan [root]` runs the scan headlessly and prints the report path,
+// so the scan is testable without clicking a menu (and usable from a shell).
+if let index = CommandLine.arguments.firstIndex(of: "--scan") {
+    let root = CommandLine.arguments.count > index + 1
+        && !CommandLine.arguments[index + 1].hasPrefix("--")
+        ? CommandLine.arguments[index + 1] : NSHomeDirectory()
+    do {
+        let result = try runScan(root: root)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dfui", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("scan.html")
+        try renderHTML(result).write(to: url, atomically: true, encoding: .utf8)
+
+        FileHandle.standardError.write(Data("""
+        scanned \(root) in \(String(format: "%.1f", result.elapsed))s
+        \(result.targets.count) cargo targets, \(formatBytes(result.reclaimable)) reclaimable
+        \(result.rejectedTargets.count) rejected as not-cargo
+
+        """.utf8))
+        print(url.path)
+        exit(0)
+    } catch {
+        FileHandle.standardError.write(Data("dfui: \(error)\n".utf8))
+        exit(1)
+    }
 }
 
 // `dfui --simulate-free-gb 50` pretends the disk has that much free, so the
