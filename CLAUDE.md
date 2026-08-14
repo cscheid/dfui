@@ -29,6 +29,12 @@ bar, and conclude your change didn't work. It did; you're looking at the
 previous install. **Any change you want to actually see must be followed by
 `./scripts/install.sh`.**
 
+This is not hypothetical — it cost a debugging cycle during the single-instance
+work. `dist/` had the new code and `~/Applications` still had the old, so the
+feature worked in one direction and appeared broken in the other. If behaviour
+differs depending on *which copy* you launch, suspect a stale install before
+suspecting the code.
+
 The script handles the awkward parts: it quits the installed copy before
 overwriting the bundle, and relaunches it afterwards if it had been running, so
 a reinstall doesn't silently leave your menu bar empty.
@@ -56,6 +62,24 @@ swift run dfui --simulate-free-gb 110   # normal, "0.11/2TB"
 
 Keep that flag working. An alarm nobody has ever seen fire is an alarm nobody
 should trust, and the real condition is expensive to reproduce.
+
+## Single instance
+
+On launch, `SingleInstance.terminateOthers()` quits already-running copies with
+the same bundle identifier, before adding our own status item. Policy is
+**newest wins** — you launched it, you get it — which matches `install.sh`.
+
+Two deliberate limits:
+
+- **Unbundled instances are exempt.** `swift run dfui` has no bundle
+  identifier, and matching nil-against-nil would match every unbundled process
+  on the system. When probing this, `NSWorkspace` reported 16 node processes
+  with a nil bundle identifier — a naive match would have terminated all of
+  them. So an unbundled dev instance and the installed app *can* both sit in
+  the menu bar. That is the safe failure.
+- **Ordering falls back to process identifiers**, because
+  `NSRunningApplication.current.launchDate` is nil for a directly exec'd
+  process. See the comment on `supersedes` for the residual race.
 
 ## Login item
 

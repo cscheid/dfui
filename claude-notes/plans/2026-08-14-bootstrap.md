@@ -85,6 +85,32 @@ Also measured: `volumeAvailableCapacityForOpportunisticUsage` reads ~12 GB
 below plain available — macOS's own estimate of the headroom it wants. A useful
 sanity check that "the system is unhappy" starts well above zero bytes.
 
+## Follow-up: single instance (br-single-instance-fnpb0t1k)
+
+- [x] `SingleInstance.terminateOthers()` on launch, before the status item
+- [x] Newest-wins ordering with a process-identifier tiebreak
+- [x] Verified both directions and the unbundled case
+
+### Notes
+
+`NSRunningApplication.current.launchDate` is **nil** for a directly exec'd
+process, so the PID tiebreak is the ordinary path, not a rare fallback.
+
+The unbundled (`swift run dfui`) case is deliberately exempt: matching a nil
+bundle identifier against nil would match every unbundled process. A probe
+found 16 node processes in that state, all of which a naive match would have
+terminated. An unbundled dev instance can therefore coexist with the installed
+app — the safe failure, and documented.
+
+### Methodology note
+
+The first round of testing produced a confusing asymmetry — `dist/` terminated
+`~/Applications` but not the reverse. The cause was not the code: `dist/` had
+been rebuilt and `~/Applications` had not, so the installed copy was running
+pre-feature code. Exactly the hazard already written up in CLAUDE.md, walked
+into while implementing the next feature. Rebuild *both* copies before
+comparing their behaviour.
+
 ## Design decisions
 
 **Swift + SwiftPM, no Xcode project.** The machine has Command Line Tools only

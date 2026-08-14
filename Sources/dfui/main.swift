@@ -10,6 +10,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var loginItemMenuItem: NSMenuItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Before adding our own status item, so there is never a moment with
+        // two indicators visible.
+        SingleInstance.terminateOthers()
+
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.menu = buildMenu()
         statusItem = item
