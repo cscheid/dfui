@@ -1,0 +1,11 @@
+# braid: the doc id is a bearer token granting read/write access to the skein
+.braid.toml
+
+# SwiftPM
+.build/
+.swiftpm/
+
+# built app bundle
+/dist/
+
+.DS_Store
