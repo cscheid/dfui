@@ -25,6 +25,31 @@ Not in scope: App Store distribution, code signing beyond ad-hoc, icons.
 - [x] Extend CLAUDE.md with build/run/test instructions
 - [x] Initial commit
 
+## Follow-up: run at login (br-login-item-g0o3k6la)
+
+- [x] `scripts/install.sh` installing to `~/Applications`, stopping and
+      relaunching a running instance
+- [x] "Open at Login" menu item backed by `SMAppService.mainApp`
+- [x] `dfui --login-item [status|enable|disable]` so the registration is
+      testable without clicking a menu
+- [x] Document that rebuilds require a reinstall
+- [x] Verify registration end to end
+
+### What the verification established
+
+Registration works with an **ad-hoc signature** from **`~/Applications`** —
+neither a Developer ID nor `/Applications` is required, and it lands in
+`.enabled` rather than `.requiresApproval`, so there is no separate approval
+step. macOS confirmed with its own "Login Item Added" notification.
+
+The registration **survives replacing the bundle** (`rm -rf` + `cp -R`), so
+`install.sh` does not need to re-register after an update.
+
+BTM registrations are **not** visible in `launchctl list`; that lookup returns
+nothing even when the item is enabled. Use `--login-item status` instead.
+
+Not verifiable here: that it actually launches on boot. That needs a reboot.
+
 ## Design decisions
 
 **Swift + SwiftPM, no Xcode project.** The machine has Command Line Tools only

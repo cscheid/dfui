@@ -11,12 +11,54 @@ accumulate cargo `target/` directories worth hundreds of GB.
 swift build                 # library + executables
 swift run selftest          # the test suite (see below)
 ./scripts/build-app.sh      # -> dist/dfui.app, ad-hoc signed
-open dist/dfui.app          # quit from the menu bar item's Quit entry
+./scripts/install.sh        # -> ~/Applications/dfui.app (the real install)
 ```
 
 `swift run dfui` also works and puts an item in the menu bar, but the `.app`
 bundle is the real target: `LSUIElement` in its Info.plist is what keeps the
 Dock icon away.
+
+### ⚠️ Rebuilding does not update the installed app
+
+`~/Applications/dfui.app` is a **copy**. `swift build` and `build-app.sh` only
+touch `.build/` and `dist/` — the running menu bar item keeps executing the old
+code until you re-run `./scripts/install.sh`.
+
+This bites in a specific way: you change something, rebuild, look at the menu
+bar, and conclude your change didn't work. It did; you're looking at the
+previous install. **Any change you want to actually see must be followed by
+`./scripts/install.sh`.**
+
+The script handles the awkward parts: it quits the installed copy before
+overwriting the bundle, and relaunches it afterwards if it had been running, so
+a reinstall doesn't silently leave your menu bar empty.
+
+## Login item
+
+"Open at Login" in the menu drives `SMAppService.mainApp`, which registers with
+Background Task Management. Notes worth keeping:
+
+- It registers **the bundle at its current path**, which is why the app should
+  be installed to `~/Applications` rather than run out of `dist/` in the working
+  tree. A login item pointing into a build directory breaks the first time that
+  directory is cleaned.
+- Verified working with an **ad-hoc signature** from `~/Applications` — it needs
+  neither a Developer ID nor `/Applications`, and registers as `.enabled`
+  without a separate approval step.
+- The registration **survives a reinstall** (`rm -rf` + `cp -R` of the bundle),
+  so `install.sh` does not need to re-register.
+- It does **not** appear in `launchctl list` — BTM registrations aren't user
+  launchd agents. Check status with `dfui --login-item status`, or in System
+  Settings › General › Login Items & Extensions.
+
+```sh
+~/Applications/dfui.app/Contents/MacOS/dfui --login-item status
+~/Applications/dfui.app/Contents/MacOS/dfui --login-item enable
+~/Applications/dfui.app/Contents/MacOS/dfui --login-item disable
+```
+
+That CLI exists mostly so the login item is testable without clicking a menu —
+`SMAppService` state is otherwise hard to inspect from a script.
 
 ## Toolchain constraints — read before adding tests or Xcode-isms
 
@@ -39,8 +81,10 @@ consequences:
 |---|---|
 | `Sources/DiskStats/` | `statfs(2)` reader and the number formatting — all the logic worth testing |
 | `Sources/dfui/` | `NSStatusItem` wiring; deliberately thin |
+| `Sources/dfui/LoginItem.swift` | `SMAppService` wrapper behind a small state enum |
 | `Sources/selftest/` | assertions, including a cross-check against `df -k` |
 | `scripts/build-app.sh` | builds and signs `dist/dfui.app` |
+| `scripts/install.sh` | copies that bundle to `~/Applications`, restarting it |
 | `resources/Info.plist` | bundle metadata; `LSUIElement` lives here |
 
 ## Conventions
